@@ -36,7 +36,7 @@ fn hex2num_code(c: char) -> Result<u8, WinErr> {
         .map(|n| n as u8)
         .ok_or(WinErr::InvalidHexChar(c))
 }
-fn from_hex(input:&str) -> Result<u8, WinErr> {
+pub fn from_hex(input:&str) -> Result<u8, WinErr> {
     let mut output = 0_u8;
     
     let iterator = input.chars().rev().enumerate();
@@ -55,7 +55,7 @@ fn num2hex_code(num: u8) -> Result<char, WinErr> {
         _ => Err(WinErr::InvalidNumCode(num))
     }
 }
-fn to_hex(num: u32) -> Result<String, WinErr> {
+pub fn to_hex(num: u32) -> Result<String, WinErr> {
     let mut hex_string = String::new();
 
     for i in (0..8).rev() {
@@ -67,6 +67,26 @@ fn to_hex(num: u32) -> Result<String, WinErr> {
     }
 
     Ok(hex_string)
+}
+
+fn dist(p1:(usize, usize), p2:(usize, usize)) -> f64 {
+    let fp1 = (p1.0 as f64, p1.1 as f64);
+    let fp2 = (p2.0 as f64, p2.1 as f64);
+    (((fp2.0 - fp1.0).powi(2) + (fp2.1 - fp1.1).powi(2))).sqrt()
+
+}
+
+fn tupf64(tup:(usize, usize)) -> (f64, f64) {
+    (tup.0 as f64, tup.1 as f64)
+}
+
+fn perpendicular_line(slope: f64, midpoint: (f64, f64), length: f64) -> ((f64, f64), (f64, f64)) {
+    let m_perp = -1.0 / slope;
+    let dx = length / (2.0 * (1.0 + m_perp.powi(2)).sqrt());
+    let dy = m_perp * dx;
+    let start = (midpoint.0 - dx, midpoint.1 - dy);
+    let end = (midpoint.0 + dx, midpoint.1 + dy);
+    (start, end)
 }
 
 pub struct WindowContainer {
@@ -81,18 +101,7 @@ pub struct WindowContainer {
 }
 
 impl WindowContainer {
-    pub fn new_dec(width:usize, height:usize, name:&str, bg_color:u32) -> Result<Self, WinErr> {
-        if bg_color > 16777215 {return Err(WinErr::InvalidRGBValue(bg_color))}
-        
-        let buffer = vec![bg_color; width * height];
-        let window = minifb::Window::new(name, width, height, minifb::WindowOptions::default()).unwrap();
-
-        let length = buffer.len();
-
-        Ok(WindowContainer {buffer, window, width, height, bg_color, length})
-    }
-
-    pub fn new_hex(width:usize, height:usize, name:&str, color:&str) -> Result<Self, WinErr> {
+    pub fn new(width:usize, height:usize, name:&str, color:&str) -> Result<Self, WinErr> {
         let bg_color = hex_to_rgb(color)?;
         if bg_color > 16777215 {return Err(WinErr::InvalidRGBValue(bg_color))}
 
@@ -133,6 +142,89 @@ impl WindowContainer {
         Ok(WinElement {value:self.buffer[i].clone(), owner:self, index:i})
     }
 
+
+    fn pos_to_nth(&self, pos:(usize, usize)) -> usize {
+        (pos.1 * self.width) + pos.0
+    }
+    fn nth_to_pos(&self, i:usize) -> (usize, usize) {
+        (i / self.width, i % self.width)
+    }
+
+    //drawing
+    pub fn circle(&mut self, pos:(usize, usize), r:usize, color:&str) -> unit {
+        if pos.0 >= self.width  {return Err(WinErr::InvalidPos(pos))}
+        if pos.1 >= self.height {return Err(WinErr::InvalidPos(pos))}
+
+        let range = 
+        self.pos_to_nth((pos.0 - r, pos.1 - r))
+        ..
+        self.pos_to_nth((pos.0 + r, pos.1 + r));
+
+        let x_range = pos.0-r..pos.0+r;
+        let y_range = pos.1-r..pos.1+r;
+
+        for i in range {
+            let loc = self.nth_to_pos(i);
+            
+            if x_range.contains(&loc.0) || y_range.contains(&loc.1){
+                if dist(loc, pos) < r as f64 {self.buffer[i] = hex_to_rgb(color)?}
+            }
+        }
+
+
+        unit!()
+    }
+
+    pub fn line(&mut self, p1:(usize, usize), p2:(usize, usize), t:f64, color:&str) -> unit {
+        let fp1 = tupf64(p1);
+        let fp2 = tupf64(p2);
+
+        //let normal_p1 = (0.0, 0.0);
+        let normal = (fp2.0-fp1.0, fp2.1-fp1.1);
+        
+        let m = (fp2.1 - fp1.1) / (fp2.0 - fp1.0);
+        let p_line = perpendicular_line(m, fp1, t);
+        let p_normal = (p_line.1.0 - p_line.0.0, p_line.1.1 - p_line.0.1);
+
+        //this should make the step smaller the longer the line is
+        let step = 1.0/dist(p1, p2);
+        let p_step = 0.5/t;
+        let mut t = 0.0;
+
+            while t <= 1.0 {
+                let point = ((normal.0*t)+fp1.0, (normal.1*t)+fp1.1);
+                let usize_p = (point.0 as usize, point.1 as usize);
+
+                let loc = self.pos_to_nth(usize_p);
+                
+
+                if usize_p.0 < self.width && usize_p.1 < self.height {
+                    self.buffer[loc] = hex_to_rgb(color)?;
+                }
+
+                let p_line = perpendicular_line(m, point, t);
+
+                let mut j = 0.0;
+                while j <= 1.0 {
+                    let p_point = ((p_normal.0*j) + p_line.0.0, (p_normal.1*j) + p_line.0.1);
+                    let usize_p_point = (p_point.0 as usize, p_point.1 as usize);
+
+                    let p_loc = self.pos_to_nth(usize_p_point);
+                    
+                    if usize_p_point.0 < self.width && usize_p_point.1 < self.height {
+                        self.buffer[p_loc] = hex_to_rgb(color)?;
+                    }
+
+                    j += p_step;
+                }
+
+                t += step;
+            }
+
+
+        unit!()
+    }
+
 }
 
 pub struct WinElement<'a> {
@@ -142,26 +234,19 @@ pub struct WinElement<'a> {
 }
 //consumes self after use
 impl WinElement<'_> {
-    pub fn read_hex(self) -> String {
+    pub fn read(self) -> String {
         //it should not be possible for this to throw
         to_hex(self.value).unwrap()
     }
 
-    pub fn read_dec(self) -> u32 {
-        self.value
-    }
 
-    pub fn write_hex(self, value:&str) -> Result<(), WinErr> {
+
+    pub fn write(self, value:&str) -> unit {
         self.owner.buffer[self.index] = hex_to_rgb(value)?;
 
         unit!()
     }
-    pub fn write_dec(self, value:u32) -> Result<(), WinErr> {
-        if value > 16777215 {return Err(WinErr::InvalidRGBValue(value))}
-        self.owner.buffer[self.index] = value;
 
-        unit!()
-    }
 
 
 }
@@ -174,21 +259,38 @@ mod tests {
     #[test]
     fn it_works() {
         //const escape = UpdateOptions::escape;
-        let mut window = WindowContainer::new_hex(255, 255, "Window", "FFFFFF").unwrap();
+        let mut window = WindowContainer::new(255, 255, "Window", "FFFFFF").unwrap();
         loop {
             window.update();
         }
     }
     #[test]
     fn rw() -> unit {
-        let mut window = WindowContainer::new_hex(255, 255, "Window", "FFFFFF").unwrap();
+        let mut window = WindowContainer::new(255, 255, "Window", "FFFFFF").unwrap();
 
-        for i in 0..window.width * window.height {window.nth(i)?.write_hex("CC00FF");}
+        for i in 0..window.width * window.height {window.nth(i)?.write("CC00FF");}
 
 
 
-        let val = window.nth(15)?.read_hex();
+        let val = window.nth(15)?.read();
         println!("{val}");
+
+        loop {
+            window.update();
+        }
+
+        unit!()
+    }
+    
+    #[test]
+    fn shapes() -> unit {
+        let mut window = WindowContainer::new(1000, 1000, "Window", "FFFFFF").unwrap();
+
+        window.circle((100, 100), 50, "CC00FF");
+        
+        window.line((230, 200), (230, 100), 5.0, "FF0000");
+        window.line((200, 200), (150, 230), 10.0, "0000FF");
+        //window.line((10, 170), (3000, 170), 3.0, "FF00FF");
 
         loop {
             window.update();

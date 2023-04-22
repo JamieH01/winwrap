@@ -1,11 +1,11 @@
-use minifb;
+//use minifb;
 use std::{process, ops::Range};
 fn from_u8_rgb(r: u8, g: u8, b: u8) -> u32 {
     let (r, g, b) = (r as u32, g as u32, b as u32);
     (r << 16) | (g << 8) | b
 }
 
-type unit = Result<(), WinErr>;
+type Unit = Result<(), WinErr>;
 
 macro_rules! unit {
     () => {
@@ -15,7 +15,7 @@ macro_rules! unit {
 
 
 pub fn hex_to_rgb(code:String) -> Result<u32, WinErr> {
-    if code.len() != 6 {return Err(WinErr::InvalidHexCode(String::from(code)))}
+    if code.len() != 6 {return Err(WinErr::InvalidHexCode(code))}
 
     let (r, gb) = code.split_at(2);
     let (g, b) = gb.split_at(2);
@@ -74,7 +74,7 @@ pub fn to_hex_u8(num: u8) -> Result<String, WinErr> {
 
     for i in (0..2).rev() {
         let shift = i * 4;
-        let hex_digit = ((num >> shift) & 0xF) as u8;
+        let hex_digit = (num >> shift) & 0xF;
         let hex_char = num2hex_code(hex_digit)?;
 
         hex_string.push(hex_char);
@@ -86,7 +86,7 @@ pub fn to_hex_u8(num: u8) -> Result<String, WinErr> {
 fn dist(p1:(usize, usize), p2:(usize, usize)) -> f64 {
     let fp1 = (p1.0 as f64, p1.1 as f64);
     let fp2 = (p2.0 as f64, p2.1 as f64);
-    (((fp2.0 - fp1.0).powi(2) + (fp2.1 - fp1.1).powi(2))).sqrt()
+    ((fp2.0 - fp1.0).powi(2) + (fp2.1 - fp1.1).powi(2)).sqrt()
 
 }
 
@@ -114,7 +114,6 @@ pub struct WindowContainer {
 
     length:usize,
 
-    iter:usize,
 }
 
 impl WindowContainer {
@@ -127,11 +126,11 @@ impl WindowContainer {
 
         let length = buffer.len();
 
-        Ok(WindowContainer {buffer, window, width, height, bg_color, length, iter:0})
+        Ok(WindowContainer {buffer, window, width, height, bg_color, length})
     }
 
 
-    pub fn update(&mut self) -> unit {
+    pub fn update(&mut self) -> Unit {
         if self.window.is_key_down(minifb::Key::Escape) {process::exit(1)}
 
 
@@ -151,7 +150,7 @@ impl WindowContainer {
         let i = (pos.1 * self.width) + pos.0;
         let val = self.buffer[i];
         
-        Ok(to_hex(val)?)
+        to_hex(val)
     }
     pub fn set(&mut self, pos:(usize, usize), val:&str) -> Result<(), WinErr> {
         if pos.0 >= self.width  {return Err(WinErr::InvalidPos(pos))}
@@ -183,14 +182,9 @@ impl WindowContainer {
     }
 
     //drawing
-    pub fn circle(&mut self, pos:(usize, usize), r:usize, color:&str) -> unit {
+    pub fn circle(&mut self, pos:(usize, usize), r:usize, color:&str) -> Unit {
         if pos.0 >= self.width  {return Err(WinErr::InvalidPos(pos))}
         if pos.1 >= self.height {return Err(WinErr::InvalidPos(pos))}
-
-        let range = 
-        self.pos_to_nth((pos.0 - r, pos.1 - r))
-        ..
-        self.pos_to_nth((pos.0 + r, pos.1 + r));
 
         let y_range = pos.1-r..pos.1+r;
 
@@ -212,7 +206,7 @@ impl WindowContainer {
         unit!()
     }
 
-    pub fn line(&mut self, p1:(usize, usize), p2:(usize, usize), t:f64, color:&str) -> unit {
+    pub fn line(&mut self, p1:(usize, usize), p2:(usize, usize), t:f64, color:&str) -> Unit {
         let fp1 = tupf64(p1);
         let fp2 = tupf64(p2);
 
@@ -303,7 +297,7 @@ mod tests {
         }
     }
     #[test]
-    fn uv_map() -> unit {
+    fn uv_map() -> Unit {
         let mut window = WindowContainer::new(255, 255, "Window", "FFFFFF").unwrap();
 
         for (val, pos) in window.iter() {
@@ -322,7 +316,7 @@ mod tests {
     }
     
     #[test]
-    fn shapes() -> unit {
+    fn shapes() -> Unit {
         let mut window = WindowContainer::new(1000, 1000, "Window", "FFFFFF").unwrap();
 
         window.circle((100, 100), 50, "CC00FF");
@@ -341,7 +335,7 @@ mod tests {
 
 #[derive(Debug)]
 pub enum WinErr {
-    minifbError(minifb::Error),
+    MinifbError(minifb::Error),
 
     InvalidHexCode(String),
     InvalidHexChar(char),
@@ -354,7 +348,7 @@ pub enum WinErr {
 
 impl From<minifb::Error> for WinErr {
     fn from(cause:minifb::Error) -> Self {
-        WinErr::minifbError(cause)
+        WinErr::MinifbError(cause)
     }
 }
 

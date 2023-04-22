@@ -1,5 +1,5 @@
 use minifb;
-use std::process;
+use std::{process, ops::Range};
 fn from_u8_rgb(r: u8, g: u8, b: u8) -> u32 {
     let (r, g, b) = (r as u32, g as u32, b as u32);
     (r << 16) | (g << 8) | b
@@ -14,16 +14,16 @@ macro_rules! unit {
 }
 
 
-pub fn hex_to_rgb(code:&str) -> Result<u32, WinErr> {
+pub fn hex_to_rgb(code:String) -> Result<u32, WinErr> {
     if code.len() != 6 {return Err(WinErr::InvalidHexCode(String::from(code)))}
 
     let (r, gb) = code.split_at(2);
     let (g, b) = gb.split_at(2);
     
     let out = from_u8_rgb(
-    from_hex(r)?,
-    from_hex(g)?,
-    from_hex(b)?
+    from_hex(r.to_string())?,
+    from_hex(g.to_string())?,
+    from_hex(b.to_string())?
     );
 
     Ok(out)
@@ -36,7 +36,7 @@ fn hex2num_code(c: char) -> Result<u8, WinErr> {
         .map(|n| n as u8)
         .ok_or(WinErr::InvalidHexChar(c))
 }
-pub fn from_hex(input:&str) -> Result<u8, WinErr> {
+pub fn from_hex(input:String) -> Result<u8, WinErr> {
     let mut output = 0_u8;
     
     let iterator = input.chars().rev().enumerate();
@@ -69,6 +69,20 @@ pub fn to_hex(num: u32) -> Result<String, WinErr> {
     Ok(hex_string)
 }
 
+pub fn to_hex_u8(num: u8) -> Result<String, WinErr> {
+    let mut hex_string = String::new();
+
+    for i in (0..2).rev() {
+        let shift = i * 4;
+        let hex_digit = ((num >> shift) & 0xF) as u8;
+        let hex_char = num2hex_code(hex_digit)?;
+
+        hex_string.push(hex_char);
+    }
+
+    Ok(hex_string)
+}
+
 fn dist(p1:(usize, usize), p2:(usize, usize)) -> f64 {
     let fp1 = (p1.0 as f64, p1.1 as f64);
     let fp2 = (p2.0 as f64, p2.1 as f64);
@@ -89,20 +103,23 @@ fn perpendicular_line(slope: f64, midpoint: (f64, f64), length: f64) -> ((f64, f
     (start, end)
 }
 
-pub struct WindowContainer {
-    pub buffer:Vec<u32>,
-    pub window:minifb::Window,
 
-    pub width:usize,
-    pub height:usize,
+pub struct WindowContainer {
+    buffer:Vec<u32>,
+    window:minifb::Window,
+
+    width:usize,
+    height:usize,
     pub bg_color:u32,
 
     length:usize,
+
+    iter:usize,
 }
 
 impl WindowContainer {
     pub fn new(width:usize, height:usize, name:&str, color:&str) -> Result<Self, WinErr> {
-        let bg_color = hex_to_rgb(color)?;
+        let bg_color = hex_to_rgb(color.to_string())?;
         if bg_color > 16777215 {return Err(WinErr::InvalidRGBValue(bg_color))}
 
         let buffer = vec![bg_color; width * height];
@@ -110,7 +127,7 @@ impl WindowContainer {
 
         let length = buffer.len();
 
-        Ok(WindowContainer {buffer, window, width, height, bg_color, length})
+        Ok(WindowContainer {buffer, window, width, height, bg_color, length, iter:0})
     }
 
 
@@ -126,20 +143,35 @@ impl WindowContainer {
         self.buffer = self.buffer.iter().map(|_| self.bg_color).collect();
     }
 
-
-    pub fn nth(&mut self, i:usize) -> Result<WinElement, WinErr> {
-        if i >= self.length {return Err(WinErr::InvalidIndex(i))}
-
-        Ok(WinElement {value:self.buffer[i].clone(), owner:self, index:i})
-    }
-
-    pub fn pos(&mut self, pos:(usize, usize)) -> Result<WinElement, WinErr> {
+    //inputs should be converted from &str -> String so that inputing params is easier
+    pub fn get(&self, pos:(usize, usize)) -> Result<String, WinErr> {
         if pos.0 >= self.width  {return Err(WinErr::InvalidPos(pos))}
         if pos.1 >= self.height {return Err(WinErr::InvalidPos(pos))}
 
         let i = (pos.1 * self.width) + pos.0;
+        let val = self.buffer[i];
+        
+        Ok(to_hex(val)?)
+    }
+    pub fn set(&mut self, pos:(usize, usize), val:&str) -> Result<(), WinErr> {
+        if pos.0 >= self.width  {return Err(WinErr::InvalidPos(pos))}
+        if pos.1 >= self.height {return Err(WinErr::InvalidPos(pos))}
 
-        Ok(WinElement {value:self.buffer[i].clone(), owner:self, index:i})
+        let i = (pos.1 * self.width) + pos.0;
+        self.buffer[i] = hex_to_rgb(val.to_string())?;
+
+        unit!()
+    }
+
+
+    pub fn iter(&self) -> std::vec::IntoIter<(u32, (usize, usize))> {
+        let mut table:Vec<(u32, (usize, usize))> = vec![];
+        
+        for i in 0..self.length {
+            table.push((self.buffer[i], self.nth_to_pos(i)));
+        }
+
+        table.into_iter()
     }
 
 
@@ -160,14 +192,19 @@ impl WindowContainer {
         ..
         self.pos_to_nth((pos.0 + r, pos.1 + r));
 
-        let x_range = pos.0-r..pos.0+r;
         let y_range = pos.1-r..pos.1+r;
 
-        for i in range {
-            let loc = self.nth_to_pos(i);
-            
-            if x_range.contains(&loc.0) || y_range.contains(&loc.1){
-                if dist(loc, pos) < r as f64 {self.buffer[i] = hex_to_rgb(color)?}
+        let mut range_table: Vec<Range<usize>> = vec![];
+        
+        for i in y_range {
+            range_table.push((pos.0+(self.width*i))-r..(pos.0+(self.width*i))+r)
+        }
+
+        for range in range_table {
+            for i in range {
+                let loc = self.nth_to_pos(i);
+
+                if dist(loc, pos) < r as f64 {self.buffer[i] = hex_to_rgb(color.to_string())?}
             }
         }
 
@@ -187,10 +224,10 @@ impl WindowContainer {
         let p_normal = (p_line.1.0 - p_line.0.0, p_line.1.1 - p_line.0.1);
 
         //this should make the step smaller the longer the line is
-        let step = 1.0/dist(p1, p2);
+        let step = (1.0/dist(p1, p2)) * 0.9999;
         let p_step = 0.5/t;
         let mut t = 0.0;
-
+        println!("{step}");
             while t <= 1.0 {
                 let point = ((normal.0*t)+fp1.0, (normal.1*t)+fp1.1);
                 let usize_p = (point.0 as usize, point.1 as usize);
@@ -199,7 +236,7 @@ impl WindowContainer {
                 
 
                 if usize_p.0 < self.width && usize_p.1 < self.height {
-                    self.buffer[loc] = hex_to_rgb(color)?;
+                    self.buffer[loc] = hex_to_rgb(color.to_string())?;
                 }
 
                 let p_line = perpendicular_line(m, point, t);
@@ -212,7 +249,7 @@ impl WindowContainer {
                     let p_loc = self.pos_to_nth(usize_p_point);
                     
                     if usize_p_point.0 < self.width && usize_p_point.1 < self.height {
-                        self.buffer[p_loc] = hex_to_rgb(color)?;
+                        self.buffer[p_loc] = hex_to_rgb(color.to_string())?;
                     }
 
                     j += p_step;
@@ -227,29 +264,30 @@ impl WindowContainer {
 
 }
 
-pub struct WinElement<'a> {
-    owner:&'a mut WindowContainer,
-    value:u32,
-    index:usize,
-}
-//consumes self after use
-impl WinElement<'_> {
-    pub fn read(self) -> String {
-        //it should not be possible for this to throw
-        to_hex(self.value).unwrap()
-    }
 
 
 
-    pub fn write(self, value:&str) -> unit {
-        self.owner.buffer[self.index] = hex_to_rgb(value)?;
-
-        unit!()
-    }
 
 
 
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 #[cfg(test)]
@@ -265,16 +303,17 @@ mod tests {
         }
     }
     #[test]
-    fn rw() -> unit {
+    fn uv_map() -> unit {
         let mut window = WindowContainer::new(255, 255, "Window", "FFFFFF").unwrap();
 
-        for i in 0..window.width * window.height {window.nth(i)?.write("CC00FF");}
-
-
-
-        let val = window.nth(15)?.read();
-        println!("{val}");
-
+        for (val, pos) in window.iter() {
+            let r = to_hex_u8(pos.0 as u8).unwrap();
+            let g = to_hex_u8(pos.1 as u8).unwrap();
+            let string = format!("{r}{g}00");
+            //println!("{string}");
+            window.set(pos, &string);
+        }
+        
         loop {
             window.update();
         }
@@ -288,10 +327,10 @@ mod tests {
 
         window.circle((100, 100), 50, "CC00FF");
         
-        window.line((230, 200), (230, 100), 5.0, "FF0000");
+        window.line((800, 1000), (800, 0), 50.0, "FF0000");
         window.line((200, 200), (150, 230), 10.0, "0000FF");
         //window.line((10, 170), (3000, 170), 3.0, "FF00FF");
-
+        
         loop {
             window.update();
         }
@@ -319,4 +358,3 @@ impl From<minifb::Error> for WinErr {
     }
 }
 
-//general input conf

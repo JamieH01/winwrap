@@ -1,3 +1,31 @@
+//!A wrapper around [minifb] that makes managing windows as simple as possible, with hexidecimal RGB.
+//!
+//!Window elements like buffers and dimensions are linked together in the [WindowContainer] struct. To keep the window alive, call update() from within a loop. This has a built-in graceful exit by pressing ESC.
+//!
+//!```rust
+//!let window = window!(?500, 500, "Window", "FFFFFF");
+//!
+//!loop {
+//!    window.update();
+//!}
+//!```
+//! 
+//!Note with the hexidecimal conversions: functions that take hexidecimal will take a &str for convenience, but functions that return hexidecimal will return a [String].
+//! 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 //use minifb;
 use std::{process, ops::Range};
 fn from_u8_rgb(r: u8, g: u8, b: u8) -> u32 {
@@ -12,8 +40,25 @@ macro_rules! unit {
         Ok(())
     };
 }
+///Initializes a [WindowContainer]. Optional background color. Begin with ? to unwrap.
+#[macro_export] macro_rules! window {
+    ($width:expr, $height:expr, $name:tt) => {
+        WindowContainer::new($width, $height, $name, "FFFFFF")
+    };
+    (?$width:expr, $height:expr, $name:tt) => {
+        WindowContainer::new($width, $height, $name, "FFFFFF").unwrap()
+    };
 
+    ($width:expr, $height:expr, $name:tt, $color:tt) => {
+        WindowContainer::new($width, $height, $name, $color)
+    };
+    (?$width:expr, $height:expr, $name:tt, $color:tt) => {
+        WindowContainer::new($width, $height, $name, $color).unwrap()
+    };
 
+}
+
+///converts a 0F0F0F format hex string into a u32.
 pub fn hex_to_rgb(code:String) -> Result<u32, WinErr> {
     if code.len() != 6 {return Err(WinErr::InvalidHexCode(code))}
 
@@ -36,6 +81,7 @@ fn hex2num_code(c: char) -> Result<u8, WinErr> {
         .map(|n| n as u8)
         .ok_or(WinErr::InvalidHexChar(c))
 }
+///Converts a hexidecimal string to a u8.
 pub fn from_hex(input:String) -> Result<u8, WinErr> {
     let mut output = 0_u8;
     
@@ -55,6 +101,7 @@ fn num2hex_code(num: u8) -> Result<char, WinErr> {
         _ => Err(WinErr::InvalidNumCode(num))
     }
 }
+///Converts a u32 to a hexidecimal string. Note that this includes leading zeros.
 pub fn to_hex(num: u32) -> Result<String, WinErr> {
     let mut hex_string = String::new();
 
@@ -68,7 +115,7 @@ pub fn to_hex(num: u32) -> Result<String, WinErr> {
 
     Ok(hex_string)
 }
-
+///Converts a u8 to a 2-char wide hexidecimal string, to concatenate into a RGB hex string. Note that this includes leading zero.
 pub fn to_hex_u8(num: u8) -> Result<String, WinErr> {
     let mut hex_string = String::new();
 
@@ -103,7 +150,7 @@ fn perpendicular_line(slope: f64, midpoint: (f64, f64), length: f64) -> ((f64, f
     (start, end)
 }
 
-
+///Contains a Window and pixel buffer, and properties.
 pub struct WindowContainer {
     buffer:Vec<u32>,
     window:minifb::Window,
@@ -117,6 +164,7 @@ pub struct WindowContainer {
 }
 
 impl WindowContainer {
+    ///Initalizes a new WindowContainer.
     pub fn new(width:usize, height:usize, name:&str, color:&str) -> Result<Self, WinErr> {
         let bg_color = hex_to_rgb(color.to_string())?;
         if bg_color > 16777215 {return Err(WinErr::InvalidRGBValue(bg_color))}
@@ -129,7 +177,7 @@ impl WindowContainer {
         Ok(WindowContainer {buffer, window, width, height, bg_color, length})
     }
 
-
+    ///Updates the window with its pixel buffer. Pressing ESC will gracefully exit the program.
     pub fn update(&mut self) -> Unit {
         if self.window.is_key_down(minifb::Key::Escape) {process::exit(1)}
 
@@ -137,12 +185,13 @@ impl WindowContainer {
         self.window.update_with_buffer(&self.buffer, self.width, self.height)?;
         unit!()
     }
-
+    ///clears the screen to the background color.
     pub fn clear(&mut self) {
         self.buffer = self.buffer.iter().map(|_| self.bg_color).collect();
     }
 
     //inputs should be converted from &str -> String so that inputing params is easier
+    ///Returns the hexidecimal value of a pixel at a position.
     pub fn get(&self, pos:(usize, usize)) -> Result<String, WinErr> {
         if pos.0 >= self.width  {return Err(WinErr::InvalidPos(pos))}
         if pos.1 >= self.height {return Err(WinErr::InvalidPos(pos))}
@@ -152,6 +201,7 @@ impl WindowContainer {
         
         to_hex(val)
     }
+    ///Sets a pixel to a hexidecimal value.
     pub fn set(&mut self, pos:(usize, usize), val:&str) -> Result<(), WinErr> {
         if pos.0 >= self.width  {return Err(WinErr::InvalidPos(pos))}
         if pos.1 >= self.height {return Err(WinErr::InvalidPos(pos))}
@@ -162,7 +212,7 @@ impl WindowContainer {
         unit!()
     }
 
-
+    ///returns an iterator over the pixel buffer, holding the raw u32 value and position. Note that the iterator pulled from the buffer is no longer linked to the window, and modifying it will do nothing.
     pub fn iter(&self) -> std::vec::IntoIter<(u32, (usize, usize))> {
         let mut table:Vec<(u32, (usize, usize))> = vec![];
         
@@ -182,6 +232,7 @@ impl WindowContainer {
     }
 
     //drawing
+    ///Draws a circle at a given position with a radius and color.
     pub fn circle(&mut self, pos:(usize, usize), r:usize, color:&str) -> Unit {
         if pos.0 >= self.width  {return Err(WinErr::InvalidPos(pos))}
         if pos.1 >= self.height {return Err(WinErr::InvalidPos(pos))}
@@ -205,7 +256,7 @@ impl WindowContainer {
 
         unit!()
     }
-
+    ///Draws a line between 2 points, with a thickness and color.
     pub fn line(&mut self, p1:(usize, usize), p2:(usize, usize), t:f64, color:&str) -> Unit {
         let fp1 = tupf64(p1);
         let fp2 = tupf64(p2);
@@ -291,7 +342,7 @@ mod tests {
     #[test]
     fn it_works() {
         //const escape = UpdateOptions::escape;
-        let mut window = WindowContainer::new(255, 255, "Window", "FFFFFF").unwrap();
+        let mut window = window!(?255, 255, "Window", "FF00FF");
         loop {
             window.update();
         }
@@ -300,11 +351,10 @@ mod tests {
     fn uv_map() -> Unit {
         let mut window = WindowContainer::new(255, 255, "Window", "FFFFFF").unwrap();
 
-        for (val, pos) in window.iter() {
+        for (_val, pos) in window.iter() {
             let r = to_hex_u8(pos.0 as u8).unwrap();
             let g = to_hex_u8(pos.1 as u8).unwrap();
             let string = format!("{r}{g}00");
-            //println!("{string}");
             window.set(pos, &string);
         }
         
@@ -333,6 +383,7 @@ mod tests {
     }
 }
 
+///Errors concerning the WindowContainer.
 #[derive(Debug)]
 pub enum WinErr {
     MinifbError(minifb::Error),

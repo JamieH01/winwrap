@@ -1,6 +1,6 @@
 [package]
 name = "winwrap"
-version = "0.0.8"
+version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A wrapper around minifb to make managing windows easier than ever"

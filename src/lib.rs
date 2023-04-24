@@ -1,4 +1,4 @@
-//!A wrapper around [minifb] that makes managing windows as simple as possible, with hexidecimal RGB.
+//!A wrapper around [minifb] that makes managing windows as simple as possible, with hexidecimal RGB rather than raw u32.
 //!
 //!Window elements like buffers and dimensions are linked together in the [WindowContainer] struct. To keep the window alive, call update() from within a loop. This has a built-in graceful exit by pressing ESC.
 //!
@@ -9,6 +9,27 @@
 //!    window.update();
 //!}
 //!```
+//! 
+//!Heres an example of a UV map generated from pixel coordinates:
+//!```rust
+//!let window = window!(?500, 500, "Window", "FFFFFF");
+//!
+//!//iterates with the value and position
+//!for (_, pos) in window.iter() {
+//!    let r = to_hex2(pos.0 as u8).unwrap();
+//!    let g = to_hex2(pos.1 as u8).unwrap();
+//!    let string = format!("{r}{g}00");
+//!
+//!    window.set(pos, &string)?;
+//!}
+//!
+//!//pressing escape will close the window
+//!loop {
+//!    window.update();
+//!}
+//!```
+//! 
+//! 
 //! 
 //!Note with the hexidecimal conversions: functions that take hexidecimal will take a &str for convenience, but functions that return hexidecimal will return a [String].
 //! 
@@ -66,9 +87,9 @@ pub fn hex_to_rgb(code:String) -> Result<u32, WinErr> {
     let (g, b) = gb.split_at(2);
     
     let out = from_u8_rgb(
-    from_hex(r.to_string())?,
-    from_hex(g.to_string())?,
-    from_hex(b.to_string())?
+    from_hex8(r.to_string())? as u8,
+    from_hex8(g.to_string())? as u8,
+    from_hex8(b.to_string())? as u8
     );
 
     Ok(out)
@@ -81,15 +102,17 @@ fn hex2num_code(c: char) -> Result<u8, WinErr> {
         .map(|n| n as u8)
         .ok_or(WinErr::InvalidHexChar(c))
 }
-///Converts a hexidecimal string to a u8.
-pub fn from_hex(input:String) -> Result<u8, WinErr> {
-    let mut output = 0_u8;
+///Converts an (up to) 8-wide hexidecimal string to a u8.
+pub fn from_hex8(input:String) -> Result<u32, WinErr> {
+    if input.len() > 8 {return Err(WinErr::InvalidHexCode(input))}
+
+    let mut output = 0_u32;
     
     let iterator = input.chars().rev().enumerate();
 
     for (i, c) in iterator {
-        let val = hex2num_code(c)?;
-        output += val * 16_u8.pow(i as u32);
+        let val = hex2num_code(c)? as u32;
+        output += val * 16_u32.pow(i as u32);
     }
 
     Ok(output)
@@ -101,11 +124,13 @@ fn num2hex_code(num: u8) -> Result<char, WinErr> {
         _ => Err(WinErr::InvalidNumCode(num))
     }
 }
-///Converts a u32 to a hexidecimal string. Note that this includes leading zeros.
-pub fn to_hex(num: u32) -> Result<String, WinErr> {
+///Converts a u32 to a 6-wide hexidecimal string. Note that this includes leading zeros.
+pub fn to_hex6(num: u32) -> Result<String, WinErr> {
+    if num > 16777215 {return Err(WinErr::OverflowNum(num))}    
+
     let mut hex_string = String::new();
 
-    for i in (0..8).rev() {
+    for i in (0..6).rev() {
         let shift = i * 4;
         let hex_digit = ((num >> shift) & 0xF) as u8;
         let hex_char = num2hex_code(hex_digit)?;
@@ -115,8 +140,8 @@ pub fn to_hex(num: u32) -> Result<String, WinErr> {
 
     Ok(hex_string)
 }
-///Converts a u8 to a 2-char wide hexidecimal string, to concatenate into a RGB hex string. Note that this includes leading zero.
-pub fn to_hex_u8(num: u8) -> Result<String, WinErr> {
+///Converts a u8 to a 2-wide hexidecimal string, to concatenate into a RGB hex string. Note that this includes leading zero.
+pub fn to_hex2(num: u8) -> Result<String, WinErr> {
     let mut hex_string = String::new();
 
     for i in (0..2).rev() {
@@ -129,6 +154,9 @@ pub fn to_hex_u8(num: u8) -> Result<String, WinErr> {
 
     Ok(hex_string)
 }
+
+
+
 
 fn dist(p1:(usize, usize), p2:(usize, usize)) -> f64 {
     let fp1 = (p1.0 as f64, p1.1 as f64);
@@ -150,7 +178,7 @@ fn perpendicular_line(slope: f64, midpoint: (f64, f64), length: f64) -> ((f64, f
     (start, end)
 }
 
-///Contains a Window and pixel buffer, and properties.
+///Contains a Window, pixel buffer, and properties.
 pub struct WindowContainer {
     buffer:Vec<u32>,
     window:minifb::Window,
@@ -178,6 +206,13 @@ impl WindowContainer {
     }
 
     ///Updates the window with its pixel buffer. Pressing ESC will gracefully exit the program.
+    ///```rust
+    ///let mut window = window!(?500, 500, "Window", "FFFFFF");
+    ///
+    ///loop {//can close by pressing ESC
+    ///    window.update();
+    ///}
+    ///```
     pub fn update(&mut self) -> Unit {
         if self.window.is_key_down(minifb::Key::Escape) {process::exit(1)}
 
@@ -186,6 +221,17 @@ impl WindowContainer {
         unit!()
     }
     ///clears the screen to the background color.
+    ///```rust
+    ///let mut window = window!(?500, 500, "Window", "FF00FF");
+    /// 
+    ///loop {
+    ///    window.clear();//clears to "FF00FF"
+    /// 
+    ///    //drawing code
+    /// 
+    ///    window.update();
+    ///}
+    ///```
     pub fn clear(&mut self) {
         self.buffer = self.buffer.iter().map(|_| self.bg_color).collect();
     }
@@ -199,7 +245,7 @@ impl WindowContainer {
         let i = (pos.1 * self.width) + pos.0;
         let val = self.buffer[i];
         
-        to_hex(val)
+        to_hex6(val)
     }
     ///Sets a pixel to a hexidecimal value.
     pub fn set(&mut self, pos:(usize, usize), val:&str) -> Result<(), WinErr> {
@@ -212,12 +258,31 @@ impl WindowContainer {
         unit!()
     }
 
-    ///returns an iterator over the pixel buffer, holding the raw u32 value and position. Note that the iterator pulled from the buffer is no longer linked to the window, and modifying it will do nothing.
-    pub fn iter(&self) -> std::vec::IntoIter<(u32, (usize, usize))> {
-        let mut table:Vec<(u32, (usize, usize))> = vec![];
+    ///returns an iterator over the pixel buffer, holding the hex value and position. Note that the iterator pulled from the buffer is no longer linked to the window, and modifying it will do nothing.
+    ///```rust
+    ///let window = window!(?500, 500, "Window", "FFFFFF");
+    ///
+    /////val:String, pos:(usize, usize)
+    ///for (val, pos) in window.iter() {
+    ///    let r = to_hex2(pos.0 as u8).unwrap();
+    ///    let g = to_hex2(pos.1 as u8).unwrap();
+    ///    let string = format!("{r}{g}00");
+    ///
+    ///    window.set(pos, &string)?;
+    ///}
+    ///
+    /////pressing escape will close the window
+    ///loop {
+    ///    window.update();
+    ///}
+    ///```
+    pub fn iter(&self) -> std::vec::IntoIter<(String, (usize, usize))> {
+        let mut table:Vec<(String, (usize, usize))> = vec![];
         
         for i in 0..self.length {
-            table.push((self.buffer[i], self.nth_to_pos(i)));
+            let string = to_hex6(self.buffer[i]).unwrap();
+
+            table.push((string, self.nth_to_pos(i)));
         }
 
         table.into_iter()
@@ -343,21 +408,23 @@ mod tests {
     fn it_works() {
         //const escape = UpdateOptions::escape;
         let mut window = window!(?255, 255, "Window", "FF00FF");
+        println!("{:?}", from_hex8(String::from("FFFFFF")));
         loop {
             window.update();
         }
     }
     #[test]
     fn uv_map() -> Unit {
-        let mut window = WindowContainer::new(255, 255, "Window", "FFFFFF").unwrap();
+        let mut window = window!(?500, 500, "Window", "FFFFFF");
 
         for (_val, pos) in window.iter() {
-            let r = to_hex_u8(pos.0 as u8).unwrap();
-            let g = to_hex_u8(pos.1 as u8).unwrap();
+            let r = to_hex2(pos.0 as u8).unwrap();
+            let g = to_hex2(pos.1 as u8).unwrap();
             let string = format!("{r}{g}00");
-            window.set(pos, &string);
+            //println!("{string}");
+            window.set(pos, &string)?;
         }
-        
+
         loop {
             window.update();
         }
@@ -391,7 +458,9 @@ pub enum WinErr {
     InvalidHexCode(String),
     InvalidHexChar(char),
     InvalidNumCode(u8),
+    OverflowNum(u32),
     InvalidRGBValue(u32),
+
 
     InvalidIndex(usize),
     InvalidPos((usize, usize)),

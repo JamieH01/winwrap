@@ -1,3 +1,7 @@
+```rust
+use miniwrap::*;
+```
+
 A wrapper around minifb that makes opening and managing windows as straightforward as possible, and with hexidecimal RGB rather than raw u32.
 
 This is an example code that will generate a UV coordinate map:

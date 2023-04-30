@@ -337,7 +337,7 @@ impl WindowContainer {
         let step = (1.0/dist(p1, p2)) * 0.9999;
         let p_step = 0.5/t;
         let mut t = 0.0;
-        println!("{step}");
+        //println!("{step}");
             while t <= 1.0 {
                 let point = ((normal.0*t)+fp1.0, (normal.1*t)+fp1.1);
                 let usize_p = (point.0 as usize, point.1 as usize);
